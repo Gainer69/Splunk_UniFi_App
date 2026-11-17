@@ -1,0 +1,72 @@
+<dashboard version="2" theme="dark">
+    <label>Security Events</label>
+    <description>UniFi CEF events: IPS and honeypot detections, internal firewall blocks, VPN sessions, admin audit</description>
+    <definition><![CDATA[
+{
+    "title": "Security Events",
+    "description": "UniFi CEF events: IPS and honeypot detections, internal firewall blocks, VPN sessions, admin audit",
+    "inputs": {
+        "input_time": {
+            "type": "input.timerange",
+            "title": "Time range",
+            "options": { "token": "global_time", "defaultValue": "-7d@d,now" }
+        }
+    },
+    "defaults": {
+        "dataSources": {
+            "ds.search": {
+                "options": {
+                    "queryParameters": { "earliest": "$global_time.earliest$", "latest": "$global_time.latest$" }
+                }
+            }
+        }
+    },
+    "dataSources": {
+        "ds_kpi_det":   { "type": "ds.search", "name": "Security detections",    "options": { "query": "index=net source=\"udp:5514\" \"CEF:\" | `unifi_cef` | where UNIFIcategory=\"Security\" AND cef_name!=\"Blocked by Firewall\" | stats count" } },
+        "ds_kpi_blk":   { "type": "ds.search", "name": "Internal blocks",        "options": { "query": "index=net source=\"udp:5514\" \"CEF:\" | `unifi_cef` | where cef_name=\"Blocked by Firewall\" | stats count" } },
+        "ds_kpi_crit":  { "type": "ds.search", "name": "High severity (7+)",     "options": { "query": "index=net source=\"udp:5514\" \"CEF:\" | `unifi_cef` | where tonumber(cef_severity)>=7 | stats count" } },
+        "ds_kpi_vpn":   { "type": "ds.search", "name": "VPN connections",        "options": { "query": "index=net source=\"udp:5514\" \"CEF:\" | `unifi_cef` | where cef_name=\"VPN Client Connected\" | stats count" } },
+        "ds_kpi_audit": { "type": "ds.search", "name": "Admin changes",          "options": { "query": "index=net source=\"udp:5514\" \"CEF:\" | `unifi_cef` | where UNIFIcategory=\"Audit\" | stats count" } },
+        "ds_timeline": { "type": "ds.search", "name": "CEF events over time", "options": { "query": "index=net source=\"udp:5514\" \"CEF:\" | `unifi_cef` | timechart limit=10 useother=true count by cef_name" } },
+        "ds_det": { "type": "ds.search", "name": "Security detections detail", "options": { "query": "index=net source=\"udp:5514\" \"CEF:\" | `unifi_cef` | where UNIFIcategory=\"Security\" AND cef_name!=\"Blocked by Firewall\" | eval Time=strftime(_time,\"%F %T\"), Device=coalesce(src_client, client_alias, UNIFIsrcClientIp, src) | sort - _time | head 100 | table Time cef_name cef_severity UNIFIrisk Device UNIFIsrcClientIp UNIFIsrcZone UNIFIdstZone cef_msg | rename cef_name AS Event, cef_severity AS Severity, UNIFIrisk AS Risk, UNIFIsrcClientIp AS \"Source IP\", UNIFIsrcZone AS \"Src zone\", UNIFIdstZone AS \"Dst zone\", cef_msg AS Message" } },
+        "ds_blk": { "type": "ds.search", "name": "Internal firewall blocks", "options": { "query": "index=net source=\"udp:5514\" \"CEF:\" | `unifi_cef` | where cef_name=\"Blocked by Firewall\" | stats count AS Blocks dc(UNIFIsrcClientIp) AS Clients values(src_client) AS devices max(_time) AS last by UNIFIsrcZone UNIFIdstZone policy_name | eval \"Source devices\"=mvjoin(mvindex(devices,0,4),\", \"), \"Last seen\"=strftime(last,\"%F %T\") | sort - Blocks | table UNIFIsrcZone UNIFIdstZone policy_name Blocks Clients \"Source devices\" \"Last seen\" | rename UNIFIsrcZone AS \"Src zone\", UNIFIdstZone AS \"Dst zone\", policy_name AS Policy" } },
+        "ds_vpn": { "type": "ds.search", "name": "VPN sessions", "options": { "query": "index=net source=\"udp:5514\" \"CEF:\" | `unifi_cef` | where like(cef_name,\"VPN Client%\") | eval Time=strftime(_time,\"%F %T\"), Event=replace(cef_name,\"VPN Client \",\"\") | sort - _time | head 100 | table Time Event suser vpn_name UNIFIvpnType duration usage_up usage_down | rename suser AS User, vpn_name AS VPN, UNIFIvpnType AS Type, duration AS Duration, usage_up AS Up, usage_down AS Down" } },
+        "ds_audit": { "type": "ds.search", "name": "Admin audit", "options": { "query": "index=net source=\"udp:5514\" \"CEF:\" | `unifi_cef` | where UNIFIcategory=\"Audit\" | eval Time=strftime(_time,\"%F %T\") | sort - _time | head 100 | table Time cef_name admin settings_section settings_entry src | rename cef_name AS Action, admin AS Admin, settings_section AS Section, settings_entry AS Entry, src AS \"From IP\"" } },
+        "ds_types": { "type": "ds.search", "name": "Event types", "options": { "query": "index=net source=\"udp:5514\" \"CEF:\" | `unifi_cef` | stats count AS Events max(_time) AS last by UNIFIcategory cef_name cef_severity | eval \"Last seen\"=strftime(last,\"%F %T\") | sort - Events | table UNIFIcategory cef_name cef_severity Events \"Last seen\" | rename UNIFIcategory AS Category, cef_name AS Event, cef_severity AS Severity" } }
+    },
+    "visualizations": {
+        "viz_navstrip": { "type": "splunk.markdown", "options": { "markdown": "[Overview](unifi_overview)   |   [Inbound / Threats](unifi_inbound)   |   [Outbound](unifi_outbound)   |   [Ports](unifi_ports)   |   **Security Events**", "fontSize": "small", "fontColor": "#d0d4da", "backgroundColor": "#1a1c21" } },
+        "viz_kpi_det":   { "type": "splunk.singlevalue", "title": "IPS / honeypot detections", "dataSources": { "primary": "ds_kpi_det" },   "options": { "majorColor": "#dc4e41" } },
+        "viz_kpi_crit":  { "type": "splunk.singlevalue", "title": "High severity (7+)",        "dataSources": { "primary": "ds_kpi_crit" },  "options": { "majorColor": "#dc4e41" } },
+        "viz_kpi_blk":   { "type": "splunk.singlevalue", "title": "Internal firewall blocks",  "dataSources": { "primary": "ds_kpi_blk" },   "options": { "majorColor": "#f1813f" } },
+        "viz_kpi_vpn":   { "type": "splunk.singlevalue", "title": "VPN connections",           "dataSources": { "primary": "ds_kpi_vpn" },   "options": { "majorColor": "#1e93c6" } },
+        "viz_kpi_audit": { "type": "splunk.singlevalue", "title": "Admin changes",             "dataSources": { "primary": "ds_kpi_audit" }, "options": { "majorColor": "#f8be34" } },
+        "viz_timeline":  { "type": "splunk.column", "title": "UniFi events over time", "dataSources": { "primary": "ds_timeline" }, "options": { "stackMode": "stacked" } },
+        "viz_det":   { "type": "splunk.table", "title": "IPS / honeypot detections (latest 100)", "dataSources": { "primary": "ds_det" } },
+        "viz_blk":   { "type": "splunk.table", "title": "Internal firewall blocks by zone and policy", "dataSources": { "primary": "ds_blk" } },
+        "viz_vpn":   { "type": "splunk.table", "title": "VPN sessions (latest 100)", "dataSources": { "primary": "ds_vpn" } },
+        "viz_audit": { "type": "splunk.table", "title": "Admin audit trail (latest 100)", "dataSources": { "primary": "ds_audit" } },
+        "viz_types": { "type": "splunk.table", "title": "All UniFi event types", "dataSources": { "primary": "ds_types" } }
+    },
+    "layout": {
+        "type": "grid",
+        "options": { "width": 1440, "height": 2210 },
+        "globalInputs": ["input_time"],
+        "structure": [
+            { "item": "viz_navstrip", "type": "block", "position": { "x": 0, "y": 0, "w": 1440, "h": 40 } },
+            { "item": "viz_kpi_det",   "type": "block", "position": { "x": 0,    "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_kpi_crit",  "type": "block", "position": { "x": 288,  "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_kpi_blk",   "type": "block", "position": { "x": 576,  "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_kpi_vpn",   "type": "block", "position": { "x": 864,  "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_kpi_audit", "type": "block", "position": { "x": 1152, "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_timeline",  "type": "block", "position": { "x": 0,    "y": 160,  "w": 1440, "h": 320 } },
+            { "item": "viz_det",       "type": "block", "position": { "x": 0,    "y": 480,  "w": 1440, "h": 400 } },
+            { "item": "viz_blk",       "type": "block", "position": { "x": 0,    "y": 880,  "w": 720,  "h": 400 } },
+            { "item": "viz_vpn",       "type": "block", "position": { "x": 720,  "y": 880,  "w": 720,  "h": 400 } },
+            { "item": "viz_audit",     "type": "block", "position": { "x": 0,    "y": 1280, "w": 1440, "h": 450 } },
+            { "item": "viz_types",     "type": "block", "position": { "x": 0,    "y": 1730, "w": 1440, "h": 480 } }
+        ]
+    }
+}
+    ]]></definition>
+</dashboard>

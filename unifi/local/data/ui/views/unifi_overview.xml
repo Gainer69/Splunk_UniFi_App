@@ -1,0 +1,108 @@
+<dashboard version="2" theme="dark">
+    <label>Overview</label>
+    <description>UniFi UDR7 traffic overview: inbound attempts vs outbound connections</description>
+    <definition><![CDATA[
+{
+    "title": "Overview",
+    "description": "UniFi UDR7 traffic overview: inbound attempts vs outbound connections",
+    "inputs": {
+        "input_time": {
+            "type": "input.timerange",
+            "title": "Time range",
+            "options": { "token": "global_time", "defaultValue": "-24h@h,now" }
+        }
+    },
+    "defaults": {
+        "dataSources": {
+            "ds.search": {
+                "options": {
+                    "queryParameters": { "earliest": "$global_time.earliest$", "latest": "$global_time.latest$" }
+                }
+            }
+        }
+    },
+    "dataSources": {
+        "ds_in_count":   { "type": "ds.search", "name": "Inbound blocked count",  "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | stats count" } },
+        "ds_in_dc":      { "type": "ds.search", "name": "Distinct attacker IPs",  "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | stats dc(src_ip) AS attackers" } },
+        "ds_out_count":  { "type": "ds.search", "name": "Outbound connections",   "options": { "query": "eventtype=unifi_traffic direction=outbound | stats count" } },
+        "ds_out_dest":   { "type": "ds.search", "name": "Distinct destinations",  "options": { "query": "eventtype=unifi_traffic direction=outbound | stats dc(dest_ip) AS destinations" } },
+        "ds_out_clients":{ "type": "ds.search", "name": "Internal clients",       "options": { "query": "eventtype=unifi_traffic direction=outbound | stats dc(src_ip) AS clients" } },
+        "ds_in_map":     { "type": "ds.search", "name": "Inbound source map",     "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | iplocation src_ip | where isnotnull(lat) AND lat!=\"\" | eval lat=round(lat,1), lon=round(lon,1), City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"-\"), port=transport.\"/\".dest_port | stats count AS c by lat lon Country Region City port src_ip | eventstats dc(src_ip) AS ips by lat lon Country Region City | stats sum(c) AS c by lat lon Country Region City port ips | sort 0 - c | stats sum(c) AS Attempts first(port) AS \"Top port\" first(ips) AS \"Source IPs\" by lat lon Country Region City | sort - Attempts | head 1000" } },
+        "ds_out_map":    { "type": "ds.search", "name": "Outbound destination map","options": { "query": "eventtype=unifi_traffic direction=outbound | iplocation dest_ip | where isnotnull(lat) AND lat!=\"\" | eval lat=round(lat,1), lon=round(lon,1), City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"-\"), port=transport.\"/\".dest_port | stats count AS c by lat lon Country Region City port dest_ip | eventstats dc(dest_ip) AS ips by lat lon Country Region City | stats sum(c) AS c by lat lon Country Region City port ips | sort 0 - c | stats sum(c) AS Connections first(port) AS \"Top port\" first(ips) AS \"Dest IPs\" by lat lon Country Region City | sort - Connections | head 1000" } },
+        "ds_in_country": { "type": "ds.search", "name": "Inbound by country",     "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | iplocation src_ip | eval Country=coalesce(nullif(Country,\"\"),\"Unknown\") | stats count AS Attempts dc(src_ip) AS \"Source IPs\" by Country | sort - Attempts | head 15" } },
+        "ds_out_country":{ "type": "ds.search", "name": "Outbound by country",    "options": { "query": "eventtype=unifi_traffic direction=outbound | iplocation dest_ip | eval Country=coalesce(nullif(Country,\"\"),\"Unknown\") | stats count AS Connections dc(dest_ip) AS \"Dest IPs\" by Country | sort - Connections | head 15" } },
+        "ds_in_ports":   { "type": "ds.search", "name": "Top targeted ports",     "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | eval port=transport.\"/\".dest_port | stats count by port | sort - count | head 10" } },
+        "ds_trend":      { "type": "ds.search", "name": "Traffic trend",          "options": { "query": "eventtype=unifi_traffic | eval series=direction.\" \".action | timechart count by series" } }
+    },
+    "visualizations": {
+        "viz_navstrip": { "type": "splunk.markdown", "options": { "markdown": "**Overview**   |   [Inbound / Threats](unifi_inbound)   |   [Outbound](unifi_outbound)   |   [Ports](unifi_ports)   |   [Security Events](unifi_security)", "fontSize": "small", "fontColor": "#d0d4da", "backgroundColor": "#1a1c21" } },
+        "viz_in_count":   { "type": "splunk.singlevalue", "title": "Inbound attempts blocked", "dataSources": { "primary": "ds_in_count" }, "options": { "majorColor": "#dc4e41" } },
+        "viz_in_dc":      { "type": "splunk.singlevalue", "title": "Distinct attacker IPs",    "dataSources": { "primary": "ds_in_dc" },    "options": { "majorColor": "#f1813f" } },
+        "viz_out_count":  { "type": "splunk.singlevalue", "title": "Outbound connections",     "dataSources": { "primary": "ds_out_count" } },
+        "viz_out_dest":   { "type": "splunk.singlevalue", "title": "Distinct destinations",    "dataSources": { "primary": "ds_out_dest" } },
+        "viz_out_clients":{ "type": "splunk.singlevalue", "title": "Internal clients",         "dataSources": { "primary": "ds_out_clients" } },
+        "viz_in_map": {
+            "type": "splunk.map",
+            "title": "Inbound attack sources (blocked)",
+            "dataSources": { "primary": "ds_in_map" },
+            "context": {
+                "inColors": [ { "to": 10, "value": "#f4a89c" }, { "from": 10, "to": 100, "value": "#e8604f" }, { "from": 100, "value": "#b31e0e" } ]
+            },
+            "options": {
+                "center": [25, 0], "zoom": 1.3,
+                "layers": [ {
+                    "type": "bubble",
+                    "latitude": "> primary | seriesByName('lat')",
+                    "longitude": "> primary | seriesByName('lon')",
+                    "bubbleSize": "> primary | seriesByName('Attempts')",
+                    "dataColors": "> primary | seriesByName('Attempts') | rangeValue(inColors)",
+                    "additionalTooltipFields": ["City", "Region", "Country", "Top port", "Source IPs"]
+                } ]
+            }
+        },
+        "viz_out_map": {
+            "type": "splunk.map",
+            "title": "Outbound destinations",
+            "dataSources": { "primary": "ds_out_map" },
+            "context": {
+                "outColors": [ { "to": 100, "value": "#9fd6ee" }, { "from": 100, "to": 1000, "value": "#3aa6d6" }, { "from": 1000, "value": "#0b5f8a" } ]
+            },
+            "options": {
+                "center": [25, 0], "zoom": 1.3,
+                "layers": [ {
+                    "type": "bubble",
+                    "latitude": "> primary | seriesByName('lat')",
+                    "longitude": "> primary | seriesByName('lon')",
+                    "bubbleSize": "> primary | seriesByName('Connections')",
+                    "dataColors": "> primary | seriesByName('Connections') | rangeValue(outColors)",
+                    "additionalTooltipFields": ["City", "Region", "Country", "Top port", "Dest IPs"]
+                } ]
+            }
+        },
+        "viz_in_country":  { "type": "splunk.table", "title": "Inbound attempts by country",   "dataSources": { "primary": "ds_in_country" } },
+        "viz_out_country": { "type": "splunk.table", "title": "Outbound connections by country","dataSources": { "primary": "ds_out_country" } },
+        "viz_in_ports":    { "type": "splunk.bar",   "title": "Most targeted ports (blocked)",  "dataSources": { "primary": "ds_in_ports" }, "options": { "legendDisplay": "off", "seriesColors": ["#dc4e41"] } },
+        "viz_trend":       { "type": "splunk.line",  "title": "Traffic over time",              "dataSources": { "primary": "ds_trend" } }
+    },
+    "layout": {
+        "type": "grid",
+        "options": { "width": 1440, "height": 1340 },
+        "globalInputs": ["input_time"],
+        "structure": [
+            { "item": "viz_navstrip", "type": "block", "position": { "x": 0, "y": 0, "w": 1440, "h": 40 } },
+            { "item": "viz_in_count",    "type": "block", "position": { "x": 0,    "y": 40,   "w": 288, "h": 120 } },
+            { "item": "viz_in_dc",       "type": "block", "position": { "x": 288,  "y": 40,   "w": 288, "h": 120 } },
+            { "item": "viz_out_count",   "type": "block", "position": { "x": 576,  "y": 40,   "w": 288, "h": 120 } },
+            { "item": "viz_out_dest",    "type": "block", "position": { "x": 864,  "y": 40,   "w": 288, "h": 120 } },
+            { "item": "viz_out_clients", "type": "block", "position": { "x": 1152, "y": 40,   "w": 288, "h": 120 } },
+            { "item": "viz_in_map",      "type": "block", "position": { "x": 0,    "y": 160, "w": 720, "h": 420 } },
+            { "item": "viz_out_map",     "type": "block", "position": { "x": 720,  "y": 160, "w": 720, "h": 420 } },
+            { "item": "viz_in_country",  "type": "block", "position": { "x": 0,    "y": 580, "w": 480, "h": 400 } },
+            { "item": "viz_out_country", "type": "block", "position": { "x": 480,  "y": 580, "w": 480, "h": 400 } },
+            { "item": "viz_in_ports",    "type": "block", "position": { "x": 960,  "y": 580, "w": 480, "h": 400 } },
+            { "item": "viz_trend",       "type": "block", "position": { "x": 0,    "y": 980, "w": 1440, "h": 360 } }
+        ]
+    }
+}
+    ]]></definition>
+</dashboard>

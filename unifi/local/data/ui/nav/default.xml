@@ -1,0 +1,8 @@
+<nav search_view="search" color="#1e93c6">
+  <view name="unifi_overview" default="true" />
+  <view name="unifi_inbound" />
+  <view name="unifi_outbound" />
+  <view name="unifi_ports" />
+  <view name="unifi_security" />
+  <view name="search" />
+</nav>

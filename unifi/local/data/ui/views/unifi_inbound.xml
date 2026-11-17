@@ -1,0 +1,108 @@
+<dashboard version="2" theme="dark">
+    <label>Inbound / Threats</label>
+    <description>Inbound traffic from the Internet: blocked attempts and allowed port-forward connections</description>
+    <definition><![CDATA[
+{
+    "title": "Inbound / Threats",
+    "description": "Inbound traffic from the Internet: blocked attempts and allowed port-forward connections",
+    "inputs": {
+        "input_time": {
+            "type": "input.timerange",
+            "title": "Time range",
+            "options": { "token": "global_time", "defaultValue": "-24h@h,now" }
+        }
+    },
+    "defaults": {
+        "dataSources": {
+            "ds.search": {
+                "options": {
+                    "queryParameters": { "earliest": "$global_time.earliest$", "latest": "$global_time.latest$" }
+                }
+            }
+        }
+    },
+    "dataSources": {
+        "ds_kpi_blk":   { "type": "ds.search", "name": "Blocked attempts",     "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | stats count" } },
+        "ds_kpi_atk":   { "type": "ds.search", "name": "Attacker IPs",         "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | stats dc(src_ip) AS attackers" } },
+        "ds_kpi_ctry":  { "type": "ds.search", "name": "Attacking countries",  "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | stats count by src_ip | iplocation src_ip | where Country!=\"\" | stats dc(Country) AS countries" } },
+        "ds_kpi_alw":   { "type": "ds.search", "name": "Allowed inbound",      "options": { "query": "eventtype=unifi_traffic direction=inbound action=allowed | stats count" } },
+        "ds_kpi_alwsrc":{ "type": "ds.search", "name": "Allowed source IPs",   "options": { "query": "eventtype=unifi_traffic direction=inbound action=allowed | stats dc(src_ip) AS sources" } },
+        "ds_blk_map": { "type": "ds.search", "name": "Blocked source map", "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | iplocation src_ip | where isnotnull(lat) AND lat!=\"\" | eval lat=round(lat,1), lon=round(lon,1), City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"-\"), port=transport.\"/\".dest_port | stats count AS c by lat lon Country Region City port src_ip | eventstats dc(src_ip) AS ips by lat lon Country Region City | stats sum(c) AS c by lat lon Country Region City port ips | sort 0 - c | stats sum(c) AS Attempts first(port) AS \"Top port\" first(ips) AS \"Source IPs\" by lat lon Country Region City | sort - Attempts | head 1000" } },
+        "ds_alw_map": { "type": "ds.search", "name": "Allowed source map", "options": { "query": "eventtype=unifi_traffic direction=inbound action=allowed | iplocation src_ip | where isnotnull(lat) AND lat!=\"\" | eval lat=round(lat,1), lon=round(lon,1), City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"-\"), port=transport.\"/\".dest_port, app=coalesce(rule,\"-\") | stats count AS Connections dc(src_ip) AS \"Source IPs\" values(port) AS Ports values(app) AS App by lat lon Country Region City | eval Ports=mvjoin(Ports,\", \"), App=mvjoin(App,\", \") | sort - Connections | head 1000" } },
+        "ds_blk_loc": { "type": "ds.search", "name": "Blocked by location", "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | iplocation src_ip | eval City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"Unknown\") | stats count AS Attempts dc(src_ip) AS \"Source IPs\" by Country Region City | sort - Attempts | head 25" } },
+        "ds_alw_tbl": { "type": "ds.search", "name": "Allowed inbound detail", "options": { "query": "eventtype=unifi_traffic direction=inbound action=allowed | eval port=transport.\"/\".dest_port, app=coalesce(rule,\"-\") | stats count AS Connections max(_time) AS last by src_ip app port | iplocation src_ip | eval Location=Country, Location=if(Region!=\"\", Region.\", \".Location, Location), Location=if(City!=\"\", City.\", \".Location, Location), \"Last seen\"=strftime(last,\"%F %T\") | sort - Connections | head 50 | table src_ip Location app port Connections \"Last seen\" | rename src_ip AS \"Source IP\", app AS App, port AS Port" } },
+        "ds_atk_tbl": { "type": "ds.search", "name": "Top attacker IPs", "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | stats count AS Attempts dc(dest_port) AS \"Ports tried\" values(dest_port) AS ports min(_time) AS first max(_time) AS last by src_ip | sort - Attempts | head 25 | iplocation src_ip | eval Ports=mvjoin(mvindex(ports,0,9),\", \"), \"First seen\"=strftime(first,\"%F %T\"), \"Last seen\"=strftime(last,\"%F %T\") | table src_ip Country Region City Attempts \"Ports tried\" Ports \"First seen\" \"Last seen\" | rename src_ip AS \"Source IP\"" } },
+        "ds_port_trend": { "type": "ds.search", "name": "Targeted ports over time", "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | eval port=transport.\"/\".dest_port | timechart limit=10 useother=true count by port" } }
+    },
+    "visualizations": {
+        "viz_navstrip": { "type": "splunk.markdown", "options": { "markdown": "[Overview](unifi_overview)   |   **Inbound / Threats**   |   [Outbound](unifi_outbound)   |   [Ports](unifi_ports)   |   [Security Events](unifi_security)", "fontSize": "small", "fontColor": "#d0d4da", "backgroundColor": "#1a1c21" } },
+        "viz_kpi_blk":    { "type": "splunk.singlevalue", "title": "Blocked attempts",     "dataSources": { "primary": "ds_kpi_blk" },    "options": { "majorColor": "#dc4e41" } },
+        "viz_kpi_atk":    { "type": "splunk.singlevalue", "title": "Attacker IPs",         "dataSources": { "primary": "ds_kpi_atk" },    "options": { "majorColor": "#f1813f" } },
+        "viz_kpi_ctry":   { "type": "splunk.singlevalue", "title": "Attacking countries",  "dataSources": { "primary": "ds_kpi_ctry" },   "options": { "majorColor": "#f8be34" } },
+        "viz_kpi_alw":    { "type": "splunk.singlevalue", "title": "Allowed inbound",      "dataSources": { "primary": "ds_kpi_alw" },    "options": { "majorColor": "#53a051" } },
+        "viz_kpi_alwsrc": { "type": "splunk.singlevalue", "title": "Allowed source IPs",   "dataSources": { "primary": "ds_kpi_alwsrc" }, "options": { "majorColor": "#53a051" } },
+        "viz_blk_map": {
+            "type": "splunk.map",
+            "title": "Blocked inbound attempts by source location",
+            "dataSources": { "primary": "ds_blk_map" },
+            "context": {
+                "inColors": [ { "to": 10, "value": "#f4a89c" }, { "from": 10, "to": 100, "value": "#e8604f" }, { "from": 100, "value": "#b31e0e" } ]
+            },
+            "options": {
+                "center": [25, 0], "zoom": 1.3,
+                "layers": [ {
+                    "type": "bubble",
+                    "latitude": "> primary | seriesByName('lat')",
+                    "longitude": "> primary | seriesByName('lon')",
+                    "bubbleSize": "> primary | seriesByName('Attempts')",
+                    "dataColors": "> primary | seriesByName('Attempts') | rangeValue(inColors)",
+                    "additionalTooltipFields": ["City", "Region", "Country", "Top port", "Source IPs"]
+                } ]
+            }
+        },
+        "viz_alw_map": {
+            "type": "splunk.map",
+            "title": "Allowed inbound (port forwards) by source location",
+            "dataSources": { "primary": "ds_alw_map" },
+            "context": {
+                "alwColors": [ { "to": 10, "value": "#a8d5a2" }, { "from": 10, "to": 100, "value": "#53a051" }, { "from": 100, "value": "#2b6b29" } ]
+            },
+            "options": {
+                "center": [25, 0], "zoom": 1.3,
+                "layers": [ {
+                    "type": "bubble",
+                    "latitude": "> primary | seriesByName('lat')",
+                    "longitude": "> primary | seriesByName('lon')",
+                    "bubbleSize": "> primary | seriesByName('Connections')",
+                    "dataColors": "> primary | seriesByName('Connections') | rangeValue(alwColors)",
+                    "additionalTooltipFields": ["City", "Region", "Country", "App", "Ports", "Source IPs"]
+                } ]
+            }
+        },
+        "viz_blk_loc":    { "type": "splunk.table", "title": "Blocked attempts by City / Region / Country", "dataSources": { "primary": "ds_blk_loc" } },
+        "viz_alw_tbl":    { "type": "splunk.table", "title": "Allowed inbound connections", "dataSources": { "primary": "ds_alw_tbl" } },
+        "viz_atk_tbl":    { "type": "splunk.table", "title": "Top attacker IPs (blocked)", "dataSources": { "primary": "ds_atk_tbl" } },
+        "viz_port_trend": { "type": "splunk.column", "title": "Most targeted ports over time (blocked)", "dataSources": { "primary": "ds_port_trend" }, "options": { "stackMode": "stacked" } }
+    },
+    "layout": {
+        "type": "grid",
+        "options": { "width": 1440, "height": 1810 },
+        "globalInputs": ["input_time"],
+        "structure": [
+            { "item": "viz_navstrip", "type": "block", "position": { "x": 0, "y": 0, "w": 1440, "h": 40 } },
+            { "item": "viz_kpi_blk",    "type": "block", "position": { "x": 0,    "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_kpi_atk",    "type": "block", "position": { "x": 288,  "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_kpi_ctry",   "type": "block", "position": { "x": 576,  "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_kpi_alw",    "type": "block", "position": { "x": 864,  "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_kpi_alwsrc", "type": "block", "position": { "x": 1152, "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_blk_map",    "type": "block", "position": { "x": 0,    "y": 160,  "w": 900,  "h": 450 } },
+            { "item": "viz_blk_loc",    "type": "block", "position": { "x": 900,  "y": 160,  "w": 540,  "h": 450 } },
+            { "item": "viz_alw_map",    "type": "block", "position": { "x": 0,    "y": 610,  "w": 900,  "h": 400 } },
+            { "item": "viz_alw_tbl",    "type": "block", "position": { "x": 900,  "y": 610,  "w": 540,  "h": 400 } },
+            { "item": "viz_atk_tbl",    "type": "block", "position": { "x": 0,    "y": 1010,  "w": 1440, "h": 450 } },
+            { "item": "viz_port_trend", "type": "block", "position": { "x": 0,    "y": 1460, "w": 1440, "h": 350 } }
+        ]
+    }
+}
+    ]]></definition>
+</dashboard>

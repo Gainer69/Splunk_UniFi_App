@@ -1,0 +1,93 @@
+<dashboard version="2" theme="dark">
+    <label>Outbound</label>
+    <description>Outbound connections from the Internal zone to the Internet</description>
+    <definition><![CDATA[
+{
+    "title": "Outbound",
+    "description": "Outbound connections from the Internal zone to the Internet",
+    "inputs": {
+        "input_time": {
+            "type": "input.timerange",
+            "title": "Time range",
+            "options": { "token": "global_time", "defaultValue": "-24h@h,now" }
+        }
+    },
+    "defaults": {
+        "dataSources": {
+            "ds.search": {
+                "options": {
+                    "queryParameters": { "earliest": "$global_time.earliest$", "latest": "$global_time.latest$" }
+                }
+            }
+        }
+    },
+    "dataSources": {
+        "ds_kpi_conn":  { "type": "ds.search", "name": "Outbound connections", "options": { "query": "eventtype=unifi_traffic direction=outbound | stats count" } },
+        "ds_kpi_cli":   { "type": "ds.search", "name": "Internal clients",     "options": { "query": "eventtype=unifi_traffic direction=outbound | stats dc(src_ip) AS clients" } },
+        "ds_kpi_dst":   { "type": "ds.search", "name": "Destination IPs",      "options": { "query": "eventtype=unifi_traffic direction=outbound | stats dc(dest_ip) AS destinations" } },
+        "ds_kpi_ctry":  { "type": "ds.search", "name": "Destination countries","options": { "query": "eventtype=unifi_traffic direction=outbound | stats count by dest_ip | iplocation dest_ip | where Country!=\"\" | stats dc(Country) AS countries" } },
+        "ds_kpi_port":  { "type": "ds.search", "name": "Destination ports",    "options": { "query": "eventtype=unifi_traffic direction=outbound | stats dc(dest_port) AS ports" } },
+        "ds_map": { "type": "ds.search", "name": "Outbound destination map", "options": { "query": "eventtype=unifi_traffic direction=outbound | iplocation dest_ip | where isnotnull(lat) AND lat!=\"\" | eval lat=round(lat,1), lon=round(lon,1), City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"-\"), port=transport.\"/\".dest_port | stats count AS c by lat lon Country Region City port dest_ip | eventstats dc(dest_ip) AS ips by lat lon Country Region City | stats sum(c) AS c by lat lon Country Region City port ips | sort 0 - c | stats sum(c) AS Connections first(port) AS \"Top port\" first(ips) AS \"Dest IPs\" by lat lon Country Region City | sort - Connections | head 1000" } },
+        "ds_loc": { "type": "ds.search", "name": "Destinations by location", "options": { "query": "eventtype=unifi_traffic direction=outbound | iplocation dest_ip | eval City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"Unknown\") | stats count AS Connections dc(dest_ip) AS \"Dest IPs\" dc(src_ip) AS Clients by Country Region City | sort - Connections | head 25" } },
+        "ds_clients": { "type": "ds.search", "name": "Top internal clients", "options": { "query": "eventtype=unifi_traffic direction=outbound | eval port=transport.\"/\".dest_port | stats count AS Connections dc(dest_ip) AS \"Dest IPs\" dc(dest_port) AS \"Dest ports\" values(src_interface) AS Interface by src_ip | sort - Connections | head 25 | rename src_ip AS \"Client IP\"" } },
+        "ds_dests": { "type": "ds.search", "name": "Top destination IPs", "options": { "query": "eventtype=unifi_traffic direction=outbound | eval port=transport.\"/\".dest_port | stats count AS Connections dc(src_ip) AS Clients values(port) AS ports by dest_ip | sort - Connections | head 25 | iplocation dest_ip | eval Ports=mvjoin(mvindex(ports,0,4),\", \") | table dest_ip Country Region City Connections Clients Ports | rename dest_ip AS \"Destination IP\"" } },
+        "ds_ports": { "type": "ds.search", "name": "Top destination ports", "options": { "query": "eventtype=unifi_traffic direction=outbound | eval port=transport.\"/\".dest_port | stats count AS Connections dc(src_ip) AS Clients dc(dest_ip) AS \"Dest IPs\" by port | sort - Connections | head 20 | rename port AS Port" } },
+        "ds_foreign": { "type": "ds.search", "name": "Clients talking outside the US", "options": { "query": "eventtype=unifi_traffic direction=outbound | stats count by src_ip dest_ip | iplocation dest_ip | where Country!=\"\" AND Country!=\"United States\" | stats sum(count) AS Connections dc(dest_ip) AS \"Dest IPs\" by src_ip Country | sort - Connections | head 25 | rename src_ip AS \"Client IP\"" } },
+        "ds_trend": { "type": "ds.search", "name": "Outbound over time", "options": { "query": "eventtype=unifi_traffic direction=outbound | timechart count by transport" } }
+    },
+    "visualizations": {
+        "viz_navstrip": { "type": "splunk.markdown", "options": { "markdown": "[Overview](unifi_overview)   |   [Inbound / Threats](unifi_inbound)   |   **Outbound**   |   [Ports](unifi_ports)   |   [Security Events](unifi_security)", "fontSize": "small", "fontColor": "#d0d4da", "backgroundColor": "#1a1c21" } },
+        "viz_kpi_conn": { "type": "splunk.singlevalue", "title": "Outbound connections",  "dataSources": { "primary": "ds_kpi_conn" }, "options": { "majorColor": "#1e93c6" } },
+        "viz_kpi_cli":  { "type": "splunk.singlevalue", "title": "Internal clients",      "dataSources": { "primary": "ds_kpi_cli" },  "options": { "majorColor": "#1e93c6" } },
+        "viz_kpi_dst":  { "type": "splunk.singlevalue", "title": "Destination IPs",       "dataSources": { "primary": "ds_kpi_dst" },  "options": { "majorColor": "#1e93c6" } },
+        "viz_kpi_ctry": { "type": "splunk.singlevalue", "title": "Destination countries", "dataSources": { "primary": "ds_kpi_ctry" }, "options": { "majorColor": "#1e93c6" } },
+        "viz_kpi_port": { "type": "splunk.singlevalue", "title": "Destination ports",     "dataSources": { "primary": "ds_kpi_port" }, "options": { "majorColor": "#1e93c6" } },
+        "viz_map": {
+            "type": "splunk.map",
+            "title": "Outbound destinations by location",
+            "dataSources": { "primary": "ds_map" },
+            "context": {
+                "outColors": [ { "to": 100, "value": "#9fd6ee" }, { "from": 100, "to": 1000, "value": "#3aa6d6" }, { "from": 1000, "value": "#0b5f8a" } ]
+            },
+            "options": {
+                "center": [25, 0], "zoom": 1.3,
+                "layers": [ {
+                    "type": "bubble",
+                    "latitude": "> primary | seriesByName('lat')",
+                    "longitude": "> primary | seriesByName('lon')",
+                    "bubbleSize": "> primary | seriesByName('Connections')",
+                    "dataColors": "> primary | seriesByName('Connections') | rangeValue(outColors)",
+                    "additionalTooltipFields": ["City", "Region", "Country", "Top port", "Dest IPs"]
+                } ]
+            }
+        },
+        "viz_loc":     { "type": "splunk.table", "title": "Destinations by City / Region / Country", "dataSources": { "primary": "ds_loc" } },
+        "viz_clients": { "type": "splunk.table", "title": "Top internal clients",                   "dataSources": { "primary": "ds_clients" } },
+        "viz_dests":   { "type": "splunk.table", "title": "Top destination IPs",                    "dataSources": { "primary": "ds_dests" } },
+        "viz_ports":   { "type": "splunk.table", "title": "Top destination ports",                  "dataSources": { "primary": "ds_ports" } },
+        "viz_foreign": { "type": "splunk.table", "title": "Clients connecting outside the US",      "dataSources": { "primary": "ds_foreign" } },
+        "viz_trend":   { "type": "splunk.column", "title": "Outbound connections over time by transport", "dataSources": { "primary": "ds_trend" }, "options": { "stackMode": "stacked" } }
+    },
+    "layout": {
+        "type": "grid",
+        "options": { "width": 1440, "height": 1760 },
+        "globalInputs": ["input_time"],
+        "structure": [
+            { "item": "viz_navstrip", "type": "block", "position": { "x": 0, "y": 0, "w": 1440, "h": 40 } },
+            { "item": "viz_kpi_conn", "type": "block", "position": { "x": 0,    "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_kpi_cli",  "type": "block", "position": { "x": 288,  "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_kpi_dst",  "type": "block", "position": { "x": 576,  "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_kpi_ctry", "type": "block", "position": { "x": 864,  "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_kpi_port", "type": "block", "position": { "x": 1152, "y": 40,    "w": 288,  "h": 120 } },
+            { "item": "viz_map",      "type": "block", "position": { "x": 0,    "y": 160,  "w": 900,  "h": 450 } },
+            { "item": "viz_loc",      "type": "block", "position": { "x": 900,  "y": 160,  "w": 540,  "h": 450 } },
+            { "item": "viz_clients",  "type": "block", "position": { "x": 0,    "y": 610,  "w": 720,  "h": 400 } },
+            { "item": "viz_dests",    "type": "block", "position": { "x": 720,  "y": 610,  "w": 720,  "h": 400 } },
+            { "item": "viz_ports",    "type": "block", "position": { "x": 0,    "y": 1010,  "w": 720,  "h": 400 } },
+            { "item": "viz_foreign",  "type": "block", "position": { "x": 720,  "y": 1010,  "w": 720,  "h": 400 } },
+            { "item": "viz_trend",    "type": "block", "position": { "x": 0,    "y": 1410, "w": 1440, "h": 350 } }
+        ]
+    }
+}
+    ]]></definition>
+</dashboard>

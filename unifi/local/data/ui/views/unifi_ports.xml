@@ -1,0 +1,74 @@
+<dashboard version="2" theme="dark">
+    <label>Ports</label>
+    <description>Most targeted and exploited ports: what is blocked, what is allowed</description>
+    <definition><![CDATA[
+{
+    "title": "Ports",
+    "description": "Most targeted and exploited ports: what is blocked, what is allowed",
+    "inputs": {
+        "input_time": {
+            "type": "input.timerange",
+            "title": "Time range",
+            "options": { "token": "global_time", "defaultValue": "-24h@h,now" }
+        }
+    },
+    "defaults": {
+        "dataSources": {
+            "ds.search": {
+                "options": {
+                    "queryParameters": { "earliest": "$global_time.earliest$", "latest": "$global_time.latest$" }
+                }
+            }
+        }
+    },
+    "dataSources": {
+        "ds_kpi_blk":  { "type": "ds.search", "name": "Ports targeted (blocked)", "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | stats dc(dest_port) AS ports" } },
+        "ds_kpi_alw":  { "type": "ds.search", "name": "Ports allowed inbound",    "options": { "query": "eventtype=unifi_traffic direction=inbound action=allowed | stats dc(dest_port) AS ports" } },
+        "ds_kpi_top":  { "type": "ds.search", "name": "Most targeted port",       "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | `unifi_port_service` | eval port=transport.\"/\".dest_port | stats count by port service | sort - count | head 1 | eval top=port.\" (\".service.\")\" | table top" } },
+        "ds_kpi_scan": { "type": "ds.search", "name": "Scanners (5+ ports)",      "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | stats dc(dest_port) AS p by src_ip | where p>=5 | stats count AS scanners" } },
+        "ds_exploited": { "type": "ds.search", "name": "Most exploited ports", "options": { "query": "eventtype=unifi_traffic direction=inbound | `unifi_port_service` | eval port=transport.\"/\".dest_port | stats count(eval(action=\"blocked\")) AS Blocked count(eval(action=\"allowed\")) AS Allowed dc(src_ip) AS \"Source IPs\" min(_time) AS first max(_time) AS last by port service category | eval Status=case(Allowed>0 AND Blocked>0,\"Mixed\", Allowed>0,\"Allowed\", true(),\"Blocked\"), \"First seen\"=strftime(first,\"%F %T\"), \"Last seen\"=strftime(last,\"%F %T\") | sort - Blocked | head 30 | table port service category Status Blocked Allowed \"Source IPs\" \"First seen\" \"Last seen\" | rename port AS Port, service AS Service, category AS Category" } },
+        "ds_bar": { "type": "ds.search", "name": "Blocked vs allowed by port", "options": { "query": "eventtype=unifi_traffic direction=inbound | eval port=transport.\"/\".dest_port | chart count over port by action | addtotals | sort - Total | head 15 | fields - Total" } },
+        "ds_cat": { "type": "ds.search", "name": "Blocked attempts by category", "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | `unifi_port_service` | stats count by category | sort - count" } },
+        "ds_scanners": { "type": "ds.search", "name": "Port scanners", "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | stats dc(dest_port) AS \"Ports tried\" count AS Attempts values(dest_port) AS ports by src_ip | where 'Ports tried'>=5 | sort - \"Ports tried\" | head 25 | iplocation src_ip | eval Ports=mvjoin(mvindex(ports,0,14),\", \") | table src_ip Country City \"Ports tried\" Attempts Ports | rename src_ip AS \"Source IP\"" } },
+        "ds_unusual": { "type": "ds.search", "name": "Outbound to uncommon ports", "options": { "query": "eventtype=unifi_traffic direction=outbound NOT dest_port IN (53, 80, 123, 443, 853) | `unifi_port_service` | eval port=transport.\"/\".dest_port | stats count AS Connections dc(src_ip) AS Clients dc(dest_ip) AS \"Dest IPs\" by port service | sort - Connections | head 20 | rename port AS Port, service AS Service" } },
+        "ds_trend": { "type": "ds.search", "name": "Blocked attempts by category over time", "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | `unifi_port_service` | timechart count by category" } }
+    },
+    "visualizations": {
+        "viz_navstrip": { "type": "splunk.markdown", "options": { "markdown": "[Overview](unifi_overview)   |   [Inbound / Threats](unifi_inbound)   |   [Outbound](unifi_outbound)   |   **Ports**   |   [Security Events](unifi_security)", "fontSize": "small", "fontColor": "#d0d4da", "backgroundColor": "#1a1c21" } },
+        "viz_kpi_blk":  { "type": "splunk.singlevalue", "title": "Ports targeted (blocked)", "dataSources": { "primary": "ds_kpi_blk" },  "options": { "majorColor": "#dc4e41" } },
+        "viz_kpi_alw":  { "type": "splunk.singlevalue", "title": "Ports allowed inbound",    "dataSources": { "primary": "ds_kpi_alw" },  "options": { "majorColor": "#53a051" } },
+        "viz_kpi_top":  { "type": "splunk.singlevalue", "title": "Most targeted port",       "dataSources": { "primary": "ds_kpi_top" },  "options": { "majorColor": "#f1813f" } },
+        "viz_kpi_scan": { "type": "splunk.singlevalue", "title": "Scanners (5+ ports tried)", "dataSources": { "primary": "ds_kpi_scan" }, "options": { "majorColor": "#f8be34" } },
+        "viz_bar": {
+            "type": "splunk.bar",
+            "title": "Top 15 inbound ports: blocked vs allowed",
+            "dataSources": { "primary": "ds_bar" },
+            "options": { "stackMode": "stacked", "seriesColorsByField": { "blocked": "#dc4e41", "allowed": "#53a051" } }
+        },
+        "viz_cat":       { "type": "splunk.pie",   "title": "Blocked attempts by service category", "dataSources": { "primary": "ds_cat" } },
+        "viz_exploited": { "type": "splunk.table", "title": "Most exploited inbound ports",          "dataSources": { "primary": "ds_exploited" } },
+        "viz_scanners":  { "type": "splunk.table", "title": "Port scanners (5+ ports tried)",        "dataSources": { "primary": "ds_scanners" } },
+        "viz_unusual":   { "type": "splunk.table", "title": "Allowed outbound to uncommon ports (not 53/80/123/443/853)", "dataSources": { "primary": "ds_unusual" } },
+        "viz_trend":     { "type": "splunk.column", "title": "Blocked attempts by service category over time", "dataSources": { "primary": "ds_trend" }, "options": { "stackMode": "stacked" } }
+    },
+    "layout": {
+        "type": "grid",
+        "options": { "width": 1440, "height": 1860 },
+        "globalInputs": ["input_time"],
+        "structure": [
+            { "item": "viz_navstrip", "type": "block", "position": { "x": 0, "y": 0, "w": 1440, "h": 40 } },
+            { "item": "viz_kpi_blk",   "type": "block", "position": { "x": 0,    "y": 40,    "w": 360,  "h": 120 } },
+            { "item": "viz_kpi_alw",   "type": "block", "position": { "x": 360,  "y": 40,    "w": 360,  "h": 120 } },
+            { "item": "viz_kpi_top",   "type": "block", "position": { "x": 720,  "y": 40,    "w": 360,  "h": 120 } },
+            { "item": "viz_kpi_scan",  "type": "block", "position": { "x": 1080, "y": 40,    "w": 360,  "h": 120 } },
+            { "item": "viz_bar",       "type": "block", "position": { "x": 0,    "y": 160,  "w": 900,  "h": 450 } },
+            { "item": "viz_cat",       "type": "block", "position": { "x": 900,  "y": 160,  "w": 540,  "h": 450 } },
+            { "item": "viz_exploited", "type": "block", "position": { "x": 0,    "y": 610,  "w": 1440, "h": 500 } },
+            { "item": "viz_scanners",  "type": "block", "position": { "x": 0,    "y": 1110, "w": 720,  "h": 400 } },
+            { "item": "viz_unusual",   "type": "block", "position": { "x": 720,  "y": 1110, "w": 720,  "h": 400 } },
+            { "item": "viz_trend",     "type": "block", "position": { "x": 0,    "y": 1510, "w": 1440, "h": 350 } }
+        ]
+    }
+}
+    ]]></definition>
+</dashboard>
