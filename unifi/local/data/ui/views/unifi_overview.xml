@@ -6,6 +6,19 @@
     "title": "Overview",
     "description": "UniFi UDR7 traffic overview: inbound attempts vs outbound connections",
     "inputs": {
+        "input_host": {
+            "type": "input.dropdown",
+            "title": "Internal host",
+            "dataSources": { "primary": "ds_hosts" },
+            "options": { "items": ">frame(label, value) | prepend(formattedStatics) | objects()", "token": "hostf", "defaultValue": "*" },
+            "context": {
+                "formattedConfig": { "number": { "prefix": "" } },
+                "formattedStatics": ">statics | formatByType(formattedConfig)",
+                "statics": [["All hosts"], ["*"]],
+                "label": ">primary | seriesByName(\"label\")",
+                "value": ">primary | seriesByName(\"value\")"
+            }
+        },
         "input_time": {
             "type": "input.timerange",
             "title": "Time range",
@@ -14,6 +27,7 @@
     },
     "defaults": {
         "dataSources": {
+        "ds_hosts": { "type": "ds.search", "name": "Host list", "options": { "query": "| inputlookup unifi_hosts_manual | append [| inputlookup unifi_hosts] | dedup ip | eval label=hostname.\" (\".ip.\")\" | sort label | rename ip AS value | table label value" } },
             "ds.search": {
                 "options": {
                     "queryParameters": { "earliest": "$global_time.earliest$", "latest": "$global_time.latest$" }
@@ -22,17 +36,20 @@
         }
     },
     "dataSources": {
-        "ds_in_count":   { "type": "ds.search", "name": "Inbound blocked count",  "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | stats count" } },
-        "ds_in_dc":      { "type": "ds.search", "name": "Distinct attacker IPs",  "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | stats dc(src_ip) AS attackers" } },
-        "ds_out_count":  { "type": "ds.search", "name": "Outbound connections",   "options": { "query": "eventtype=unifi_traffic direction=outbound | stats count" } },
-        "ds_out_dest":   { "type": "ds.search", "name": "Distinct destinations",  "options": { "query": "eventtype=unifi_traffic direction=outbound | stats dc(dest_ip) AS destinations" } },
-        "ds_out_clients":{ "type": "ds.search", "name": "Internal clients",       "options": { "query": "eventtype=unifi_traffic direction=outbound | stats dc(src_ip) AS clients" } },
-        "ds_in_map":     { "type": "ds.search", "name": "Inbound source map",     "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | iplocation src_ip | where isnotnull(lat) AND lat!=\"\" | eval lat=round(lat,1), lon=round(lon,1), City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"-\"), port=transport.\"/\".dest_port | stats count AS c by lat lon Country Region City port src_ip | eventstats dc(src_ip) AS ips by lat lon Country Region City | stats sum(c) AS c by lat lon Country Region City port ips | sort 0 - c | stats sum(c) AS Attempts first(port) AS \"Top port\" first(ips) AS \"Source IPs\" by lat lon Country Region City | sort - Attempts | head 1000" } },
-        "ds_out_map":    { "type": "ds.search", "name": "Outbound destination map","options": { "query": "eventtype=unifi_traffic direction=outbound | iplocation dest_ip | where isnotnull(lat) AND lat!=\"\" | eval lat=round(lat,1), lon=round(lon,1), City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"-\"), port=transport.\"/\".dest_port | stats count AS c by lat lon Country Region City port dest_ip | eventstats dc(dest_ip) AS ips by lat lon Country Region City | stats sum(c) AS c by lat lon Country Region City port ips | sort 0 - c | stats sum(c) AS Connections first(port) AS \"Top port\" first(ips) AS \"Dest IPs\" by lat lon Country Region City | sort - Connections | head 1000" } },
-        "ds_in_country": { "type": "ds.search", "name": "Inbound by country",     "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | iplocation src_ip | eval Country=coalesce(nullif(Country,\"\"),\"Unknown\") | stats count AS Attempts dc(src_ip) AS \"Source IPs\" by Country | sort - Attempts | head 15" } },
-        "ds_out_country":{ "type": "ds.search", "name": "Outbound by country",    "options": { "query": "eventtype=unifi_traffic direction=outbound | iplocation dest_ip | eval Country=coalesce(nullif(Country,\"\"),\"Unknown\") | stats count AS Connections dc(dest_ip) AS \"Dest IPs\" by Country | sort - Connections | head 15" } },
-        "ds_in_ports":   { "type": "ds.search", "name": "Top targeted ports",     "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | eval port=transport.\"/\".dest_port | stats count by port | sort - count | head 10" } },
-        "ds_trend":      { "type": "ds.search", "name": "Traffic trend",          "options": { "query": "eventtype=unifi_traffic | eval series=direction.\" \".action | timechart count by series" } }
+        "ds_hosts": { "type": "ds.search", "name": "Host list", "options": { "query": "| inputlookup unifi_hosts_manual | append [| inputlookup unifi_hosts] | dedup ip | eval label=hostname.\" (\".ip.\")\" | sort label | rename ip AS value | table label value" } },
+        "ds_in_count":   { "type": "ds.search", "name": "Inbound blocked count",  "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound action=blocked | stats count" } },
+        "ds_in_dc":      { "type": "ds.search", "name": "Distinct attacker IPs",  "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound action=blocked | stats dc(src_ip) AS attackers" } },
+        "ds_out_count":  { "type": "ds.search", "name": "Outbound connections",   "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | stats count" } },
+        "ds_out_dest":   { "type": "ds.search", "name": "Distinct destinations",  "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | stats dc(dest_ip) AS destinations" } },
+        "ds_out_clients":{ "type": "ds.search", "name": "Internal clients",       "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | stats dc(src_ip) AS clients" } },
+        "ds_in_map":     { "type": "ds.search", "name": "Inbound source map",     "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound action=blocked | iplocation src_ip | where isnotnull(lat) AND lat!=\"\" | eval lat=round(lat,1), lon=round(lon,1), City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"-\"), port=transport.\"/\".dest_port | stats count AS c by lat lon Country Region City port src_ip | eventstats dc(src_ip) AS ips by lat lon Country Region City | stats sum(c) AS c by lat lon Country Region City port ips | sort 0 - c | stats sum(c) AS Attempts first(port) AS \"Top port\" first(ips) AS \"Source IPs\" by lat lon Country Region City | sort - Attempts | head 1000" } },
+        "ds_out_map":    { "type": "ds.search", "name": "Outbound destination map","options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | iplocation dest_ip | where isnotnull(lat) AND lat!=\"\" | eval lat=round(lat,1), lon=round(lon,1), City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"-\"), port=transport.\"/\".dest_port | stats count AS c by lat lon Country Region City port dest_ip | eventstats dc(dest_ip) AS ips by lat lon Country Region City | stats sum(c) AS c by lat lon Country Region City port ips | sort 0 - c | stats sum(c) AS Connections first(port) AS \"Top port\" first(ips) AS \"Dest IPs\" by lat lon Country Region City | sort - Connections | head 1000" } },
+        "ds_in_country": { "type": "ds.search", "name": "Inbound by country",     "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound action=blocked | iplocation src_ip | eval Country=coalesce(nullif(Country,\"\"),\"Unknown\") | stats count AS Attempts dc(src_ip) AS \"Source IPs\" by Country | sort - Attempts | head 15" } },
+        "ds_out_country":{ "type": "ds.search", "name": "Outbound by country",    "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | iplocation dest_ip | eval Country=coalesce(nullif(Country,\"\"),\"Unknown\") | stats count AS Connections dc(dest_ip) AS \"Dest IPs\" by Country | sort - Connections | head 15" } },
+        "ds_in_ports":   { "type": "ds.search", "name": "Top targeted ports",     "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound action=blocked | eval port=transport.\"/\".dest_port | stats count by port | sort - count | head 10" } },
+        "ds_top_hosts":  { "type": "ds.search", "name": "Top internal hosts",     "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | eval src_host=coalesce(src_host,\"-\"), port=transport.\"/\".dest_port | stats count by src_ip src_host dest_ip port | iplocation dest_ip | stats sum(count) AS Connections dc(dest_ip) AS Destinations dc(Country) AS Countries values(port) AS ports by src_ip src_host | sort - Connections | head 15 | eval \"Sample ports\"=mvjoin(mvindex(ports,0,5),\", \") | rename src_host AS Host, src_ip AS IP | table Host IP Connections Destinations Countries \"Sample ports\"" } },
+        "ds_exposed":    { "type": "ds.search", "name": "Exposed internal hosts", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound action=allowed | eval dest_host=coalesce(dest_host,\"-\"), port=transport.\"/\".dest_port, app=coalesce(rule,\"-\") | stats count by dest_ip dest_host port app src_ip | iplocation src_ip | stats sum(count) AS Connections dc(src_ip) AS \"Source IPs\" values(Country) AS countries values(port) AS ports values(app) AS apps by dest_ip dest_host | eval Ports=mvjoin(ports,\", \"), App=mvjoin(apps,\", \"), \"From countries\"=mvjoin(mvindex(countries,0,4),\", \") | sort - Connections | rename dest_host AS Host, dest_ip AS IP | table Host IP App Ports Connections \"Source IPs\" \"From countries\"" } },
+        "ds_trend":      { "type": "ds.search", "name": "Traffic trend",          "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) | eval series=direction.\" \".action | timechart count by series" } }
     },
     "visualizations": {
         "viz_navstrip": { "type": "splunk.markdown", "options": { "markdown": "**Overview**   |   [Inbound / Threats](unifi_inbound)   |   [Outbound](unifi_outbound)   |   [Ports](unifi_ports)   |   [Security Events](unifi_security)", "fontSize": "small", "fontColor": "#d0d4da", "backgroundColor": "#1a1c21" } },
@@ -82,12 +99,14 @@
         "viz_in_country":  { "type": "splunk.table", "title": "Inbound attempts by country",   "dataSources": { "primary": "ds_in_country" } },
         "viz_out_country": { "type": "splunk.table", "title": "Outbound connections by country","dataSources": { "primary": "ds_out_country" } },
         "viz_in_ports":    { "type": "splunk.bar",   "title": "Most targeted ports (blocked)",  "dataSources": { "primary": "ds_in_ports" }, "options": { "legendDisplay": "off", "seriesColors": ["#dc4e41"] } },
+        "viz_top_hosts":   { "type": "splunk.table", "title": "Top internal hosts going out (click a row to filter)", "dataSources": { "primary": "ds_top_hosts" }, "eventHandlers": [ { "type": "drilldown.setToken", "options": { "tokens": [ { "token": "hostf", "key": "row.IP.value" } ] } } ] },
+        "viz_exposed":     { "type": "splunk.table", "title": "Exposed internal hosts: allowed inbound (click a row to filter)", "dataSources": { "primary": "ds_exposed" }, "eventHandlers": [ { "type": "drilldown.setToken", "options": { "tokens": [ { "token": "hostf", "key": "row.IP.value" } ] } } ] },
         "viz_trend":       { "type": "splunk.line",  "title": "Traffic over time",              "dataSources": { "primary": "ds_trend" } }
     },
     "layout": {
         "type": "grid",
-        "options": { "width": 1440, "height": 1340 },
-        "globalInputs": ["input_time"],
+        "options": { "width": 1440, "height": 1740 },
+        "globalInputs": ["input_time", "input_host"],
         "structure": [
             { "item": "viz_navstrip", "type": "block", "position": { "x": 0, "y": 0, "w": 1440, "h": 40 } },
             { "item": "viz_in_count",    "type": "block", "position": { "x": 0,    "y": 40,   "w": 288, "h": 120 } },
@@ -100,7 +119,9 @@
             { "item": "viz_in_country",  "type": "block", "position": { "x": 0,    "y": 580, "w": 480, "h": 400 } },
             { "item": "viz_out_country", "type": "block", "position": { "x": 480,  "y": 580, "w": 480, "h": 400 } },
             { "item": "viz_in_ports",    "type": "block", "position": { "x": 960,  "y": 580, "w": 480, "h": 400 } },
-            { "item": "viz_trend",       "type": "block", "position": { "x": 0,    "y": 980, "w": 1440, "h": 360 } }
+            { "item": "viz_top_hosts",   "type": "block", "position": { "x": 0,    "y": 980, "w": 720, "h": 400 } },
+            { "item": "viz_exposed",     "type": "block", "position": { "x": 720,  "y": 980, "w": 720, "h": 400 } },
+            { "item": "viz_trend",       "type": "block", "position": { "x": 0,    "y": 1380, "w": 1440, "h": 360 } }
         ]
     }
 }

@@ -6,6 +6,19 @@
     "title": "Outbound",
     "description": "Outbound connections from the Internal zone to the Internet",
     "inputs": {
+        "input_host": {
+            "type": "input.dropdown",
+            "title": "Internal host",
+            "dataSources": { "primary": "ds_hosts" },
+            "options": { "items": ">frame(label, value) | prepend(formattedStatics) | objects()", "token": "hostf", "defaultValue": "*" },
+            "context": {
+                "formattedConfig": { "number": { "prefix": "" } },
+                "formattedStatics": ">statics | formatByType(formattedConfig)",
+                "statics": [["All hosts"], ["*"]],
+                "label": ">primary | seriesByName(\"label\")",
+                "value": ">primary | seriesByName(\"value\")"
+            }
+        },
         "input_time": {
             "type": "input.timerange",
             "title": "Time range",
@@ -14,6 +27,7 @@
     },
     "defaults": {
         "dataSources": {
+        "ds_hosts": { "type": "ds.search", "name": "Host list", "options": { "query": "| inputlookup unifi_hosts_manual | append [| inputlookup unifi_hosts] | dedup ip | eval label=hostname.\" (\".ip.\")\" | sort label | rename ip AS value | table label value" } },
             "ds.search": {
                 "options": {
                     "queryParameters": { "earliest": "$global_time.earliest$", "latest": "$global_time.latest$" }
@@ -22,18 +36,20 @@
         }
     },
     "dataSources": {
-        "ds_kpi_conn":  { "type": "ds.search", "name": "Outbound connections", "options": { "query": "eventtype=unifi_traffic direction=outbound | stats count" } },
-        "ds_kpi_cli":   { "type": "ds.search", "name": "Internal clients",     "options": { "query": "eventtype=unifi_traffic direction=outbound | stats dc(src_ip) AS clients" } },
-        "ds_kpi_dst":   { "type": "ds.search", "name": "Destination IPs",      "options": { "query": "eventtype=unifi_traffic direction=outbound | stats dc(dest_ip) AS destinations" } },
-        "ds_kpi_ctry":  { "type": "ds.search", "name": "Destination countries","options": { "query": "eventtype=unifi_traffic direction=outbound | stats count by dest_ip | iplocation dest_ip | where Country!=\"\" | stats dc(Country) AS countries" } },
-        "ds_kpi_port":  { "type": "ds.search", "name": "Destination ports",    "options": { "query": "eventtype=unifi_traffic direction=outbound | stats dc(dest_port) AS ports" } },
-        "ds_map": { "type": "ds.search", "name": "Outbound destination map", "options": { "query": "eventtype=unifi_traffic direction=outbound | iplocation dest_ip | where isnotnull(lat) AND lat!=\"\" | eval lat=round(lat,1), lon=round(lon,1), City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"-\"), port=transport.\"/\".dest_port | stats count AS c by lat lon Country Region City port dest_ip | eventstats dc(dest_ip) AS ips by lat lon Country Region City | stats sum(c) AS c by lat lon Country Region City port ips | sort 0 - c | stats sum(c) AS Connections first(port) AS \"Top port\" first(ips) AS \"Dest IPs\" by lat lon Country Region City | sort - Connections | head 1000" } },
-        "ds_loc": { "type": "ds.search", "name": "Destinations by location", "options": { "query": "eventtype=unifi_traffic direction=outbound | iplocation dest_ip | eval City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"Unknown\") | stats count AS Connections dc(dest_ip) AS \"Dest IPs\" dc(src_ip) AS Clients by Country Region City | sort - Connections | head 25" } },
-        "ds_clients": { "type": "ds.search", "name": "Top internal clients", "options": { "query": "eventtype=unifi_traffic direction=outbound | eval port=transport.\"/\".dest_port | stats count AS Connections dc(dest_ip) AS \"Dest IPs\" dc(dest_port) AS \"Dest ports\" values(src_interface) AS Interface by src_ip | sort - Connections | head 25 | rename src_ip AS \"Client IP\"" } },
-        "ds_dests": { "type": "ds.search", "name": "Top destination IPs", "options": { "query": "eventtype=unifi_traffic direction=outbound | eval port=transport.\"/\".dest_port | stats count AS Connections dc(src_ip) AS Clients values(port) AS ports by dest_ip | sort - Connections | head 25 | iplocation dest_ip | eval Ports=mvjoin(mvindex(ports,0,4),\", \") | table dest_ip Country Region City Connections Clients Ports | rename dest_ip AS \"Destination IP\"" } },
-        "ds_ports": { "type": "ds.search", "name": "Top destination ports", "options": { "query": "eventtype=unifi_traffic direction=outbound | eval port=transport.\"/\".dest_port | stats count AS Connections dc(src_ip) AS Clients dc(dest_ip) AS \"Dest IPs\" by port | sort - Connections | head 20 | rename port AS Port" } },
-        "ds_foreign": { "type": "ds.search", "name": "Clients talking outside the US", "options": { "query": "eventtype=unifi_traffic direction=outbound | stats count by src_ip dest_ip | iplocation dest_ip | where Country!=\"\" AND Country!=\"United States\" | stats sum(count) AS Connections dc(dest_ip) AS \"Dest IPs\" by src_ip Country | sort - Connections | head 25 | rename src_ip AS \"Client IP\"" } },
-        "ds_trend": { "type": "ds.search", "name": "Outbound over time", "options": { "query": "eventtype=unifi_traffic direction=outbound | timechart count by transport" } }
+        "ds_hosts": { "type": "ds.search", "name": "Host list", "options": { "query": "| inputlookup unifi_hosts_manual | append [| inputlookup unifi_hosts] | dedup ip | eval label=hostname.\" (\".ip.\")\" | sort label | rename ip AS value | table label value" } },
+        "ds_kpi_conn":  { "type": "ds.search", "name": "Outbound connections", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | stats count" } },
+        "ds_kpi_cli":   { "type": "ds.search", "name": "Internal clients",     "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | stats dc(src_ip) AS clients" } },
+        "ds_kpi_dst":   { "type": "ds.search", "name": "Destination IPs",      "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | stats dc(dest_ip) AS destinations" } },
+        "ds_kpi_ctry":  { "type": "ds.search", "name": "Destination countries","options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | stats count by dest_ip | iplocation dest_ip | where Country!=\"\" | stats dc(Country) AS countries" } },
+        "ds_kpi_port":  { "type": "ds.search", "name": "Destination ports",    "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | stats dc(dest_port) AS ports" } },
+        "ds_map": { "type": "ds.search", "name": "Outbound destination map", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | iplocation dest_ip | where isnotnull(lat) AND lat!=\"\" | eval lat=round(lat,1), lon=round(lon,1), City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"-\"), port=transport.\"/\".dest_port | stats count AS c by lat lon Country Region City port dest_ip | eventstats dc(dest_ip) AS ips by lat lon Country Region City | stats sum(c) AS c by lat lon Country Region City port ips | sort 0 - c | stats sum(c) AS Connections first(port) AS \"Top port\" first(ips) AS \"Dest IPs\" by lat lon Country Region City | sort - Connections | head 1000" } },
+        "ds_loc": { "type": "ds.search", "name": "Destinations by location", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | iplocation dest_ip | eval City=coalesce(nullif(City,\"\"),\"-\"), Region=coalesce(nullif(Region,\"\"),\"-\"), Country=coalesce(nullif(Country,\"\"),\"Unknown\") | stats count AS Connections dc(dest_ip) AS \"Dest IPs\" dc(src_ip) AS Clients by Country Region City | sort - Connections | head 25" } },
+        "ds_clients": { "type": "ds.search", "name": "Top internal clients", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | eval src_host=coalesce(src_host,\"-\") | stats count AS Connections dc(dest_ip) AS \"Dest IPs\" dc(dest_port) AS \"Dest ports\" values(src_interface) AS Interface by src_host src_ip | sort - Connections | head 25 | rename src_host AS Host, src_ip AS IP | table Host IP Connections \"Dest IPs\" \"Dest ports\" Interface" } },
+        "ds_dests": { "type": "ds.search", "name": "Top destination IPs", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | eval port=transport.\"/\".dest_port, client=coalesce(src_host,src_ip) | stats count AS Connections dc(src_ip) AS Clients values(client) AS clients values(port) AS ports by dest_ip | sort - Connections | head 25 | iplocation dest_ip | eval Ports=mvjoin(mvindex(ports,0,4),\", \"), \"Internal hosts\"=mvjoin(mvindex(clients,0,4),\", \") | table dest_ip Country Region City Connections Clients \"Internal hosts\" Ports | rename dest_ip AS \"Destination IP\"" } },
+        "ds_hcp": { "type": "ds.search", "name": "Host to country to port", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | eval src_host=coalesce(src_host,\"-\"), port=transport.\"/\".dest_port | stats count by src_host src_ip dest_ip port | iplocation dest_ip | eval Country=coalesce(nullif(Country,\"\"),\"Unknown\"), City=coalesce(nullif(City,\"\"),\"-\") | stats sum(count) AS Connections dc(dest_ip) AS \"Dest IPs\" values(City) AS cities by src_host src_ip Country port | eval Cities=mvjoin(mvindex(cities,0,2),\", \") | sort - Connections | head 100 | rename src_host AS Host, src_ip AS IP, port AS Port | table Host IP Country Cities Port Connections \"Dest IPs\"" } },
+        "ds_ports": { "type": "ds.search", "name": "Top destination ports", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | eval port=transport.\"/\".dest_port | stats count AS Connections dc(src_ip) AS Clients dc(dest_ip) AS \"Dest IPs\" by port | sort - Connections | head 20 | rename port AS Port" } },
+        "ds_foreign": { "type": "ds.search", "name": "Clients talking outside the US", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | eval src_host=coalesce(src_host,\"-\"), port=transport.\"/\".dest_port | stats count by src_host src_ip dest_ip port | iplocation dest_ip | where Country!=\"\" AND Country!=\"United States\" | stats sum(count) AS Connections dc(dest_ip) AS \"Dest IPs\" values(port) AS ports by src_host src_ip Country | eval Ports=mvjoin(mvindex(ports,0,4),\", \") | sort - Connections | head 25 | rename src_host AS Host, src_ip AS IP | table Host IP Country Ports Connections \"Dest IPs\"" } },
+        "ds_trend": { "type": "ds.search", "name": "Outbound over time", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound | timechart count by transport" } }
     },
     "visualizations": {
         "viz_navstrip": { "type": "splunk.markdown", "options": { "markdown": "[Overview](unifi_overview)   |   [Inbound / Threats](unifi_inbound)   |   **Outbound**   |   [Ports](unifi_ports)   |   [Security Events](unifi_security)", "fontSize": "small", "fontColor": "#d0d4da", "backgroundColor": "#1a1c21" } },
@@ -62,16 +78,17 @@
             }
         },
         "viz_loc":     { "type": "splunk.table", "title": "Destinations by City / Region / Country", "dataSources": { "primary": "ds_loc" } },
-        "viz_clients": { "type": "splunk.table", "title": "Top internal clients",                   "dataSources": { "primary": "ds_clients" } },
+        "viz_clients": { "type": "splunk.table", "title": "Top internal hosts (click a row to filter)", "dataSources": { "primary": "ds_clients" }, "eventHandlers": [ { "type": "drilldown.setToken", "options": { "tokens": [ { "token": "hostf", "key": "row.IP.value" } ] } } ] },
         "viz_dests":   { "type": "splunk.table", "title": "Top destination IPs",                    "dataSources": { "primary": "ds_dests" } },
+        "viz_hcp":     { "type": "splunk.table", "title": "Who goes where: internal host, country, port (click a row to filter)", "dataSources": { "primary": "ds_hcp" }, "eventHandlers": [ { "type": "drilldown.setToken", "options": { "tokens": [ { "token": "hostf", "key": "row.IP.value" } ] } } ] },
         "viz_ports":   { "type": "splunk.table", "title": "Top destination ports",                  "dataSources": { "primary": "ds_ports" } },
-        "viz_foreign": { "type": "splunk.table", "title": "Clients connecting outside the US",      "dataSources": { "primary": "ds_foreign" } },
+        "viz_foreign": { "type": "splunk.table", "title": "Hosts connecting outside the US (click a row to filter)", "dataSources": { "primary": "ds_foreign" }, "eventHandlers": [ { "type": "drilldown.setToken", "options": { "tokens": [ { "token": "hostf", "key": "row.IP.value" } ] } } ] },
         "viz_trend":   { "type": "splunk.column", "title": "Outbound connections over time by transport", "dataSources": { "primary": "ds_trend" }, "options": { "stackMode": "stacked" } }
     },
     "layout": {
         "type": "grid",
-        "options": { "width": 1440, "height": 1760 },
-        "globalInputs": ["input_time"],
+        "options": { "width": 1440, "height": 2260 },
+        "globalInputs": ["input_time", "input_host"],
         "structure": [
             { "item": "viz_navstrip", "type": "block", "position": { "x": 0, "y": 0, "w": 1440, "h": 40 } },
             { "item": "viz_kpi_conn", "type": "block", "position": { "x": 0,    "y": 40,    "w": 288,  "h": 120 } },
@@ -83,9 +100,10 @@
             { "item": "viz_loc",      "type": "block", "position": { "x": 900,  "y": 160,  "w": 540,  "h": 450 } },
             { "item": "viz_clients",  "type": "block", "position": { "x": 0,    "y": 610,  "w": 720,  "h": 400 } },
             { "item": "viz_dests",    "type": "block", "position": { "x": 720,  "y": 610,  "w": 720,  "h": 400 } },
-            { "item": "viz_ports",    "type": "block", "position": { "x": 0,    "y": 1010,  "w": 720,  "h": 400 } },
-            { "item": "viz_foreign",  "type": "block", "position": { "x": 720,  "y": 1010,  "w": 720,  "h": 400 } },
-            { "item": "viz_trend",    "type": "block", "position": { "x": 0,    "y": 1410, "w": 1440, "h": 350 } }
+            { "item": "viz_hcp",      "type": "block", "position": { "x": 0,    "y": 1010,  "w": 1440, "h": 500 } },
+            { "item": "viz_ports",    "type": "block", "position": { "x": 0,    "y": 1510,  "w": 720,  "h": 400 } },
+            { "item": "viz_foreign",  "type": "block", "position": { "x": 720,  "y": 1510,  "w": 720,  "h": 400 } },
+            { "item": "viz_trend",    "type": "block", "position": { "x": 0,    "y": 1910, "w": 1440, "h": 350 } }
         ]
     }
 }

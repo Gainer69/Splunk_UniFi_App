@@ -147,6 +147,8 @@ Then pick the reload that matches what changed:
 | New or changed dashboards | `debug/refresh`, then Ctrl+F5 in the browser |
 | `inputs.conf`, `indexes.conf`, `TZ` in props, **nav** | `sudo systemctl restart Splunkd` |
 
+**Host names:** after the first install, run `| savedsearch "UniFi - Build host lookup"` once (it then runs every 15 minutes) and check `| inputlookup unifi_hosts`. Add static-IP devices that never use DHCP to `lookups/unifi_hosts_manual.csv` on the server (`ip,hostname`). Those entries override the automatic names.
+
 Verify with `sha256sum` after every copy. Pasting long heredocs over SSH is fragile, especially when a sudo password prompt interrupts the paste.
 
 ## 7. UniFi gateway configuration
@@ -229,6 +231,5 @@ index=net "CEF:" | `unifi_cef` | stats count by UNIFIcategory cef_name
 - Summary searches into `summary`, and dashboards built from them.
 - A UDP inbound block-logging policy, using a Port List to exclude the VPN and DHCPv6 ports.
 - NetFlow/IPFIX for full flow accounting (Splunk Stream or goflow2).
-- A client-name lookup built from the CEF client events (IP to device alias) for the Outbound tables.
 - Outbound logging for other zones.
 - A UniFi add-on, if one fits later (Splunkbase 9831 polls the UniFi API and is independent of syslog).

@@ -6,6 +6,19 @@
     "title": "Ports",
     "description": "Most targeted and exploited ports: what is blocked, what is allowed",
     "inputs": {
+        "input_host": {
+            "type": "input.dropdown",
+            "title": "Internal host",
+            "dataSources": { "primary": "ds_hosts" },
+            "options": { "items": ">frame(label, value) | prepend(formattedStatics) | objects()", "token": "hostf", "defaultValue": "*" },
+            "context": {
+                "formattedConfig": { "number": { "prefix": "" } },
+                "formattedStatics": ">statics | formatByType(formattedConfig)",
+                "statics": [["All hosts"], ["*"]],
+                "label": ">primary | seriesByName(\"label\")",
+                "value": ">primary | seriesByName(\"value\")"
+            }
+        },
         "input_time": {
             "type": "input.timerange",
             "title": "Time range",
@@ -14,6 +27,7 @@
     },
     "defaults": {
         "dataSources": {
+        "ds_hosts": { "type": "ds.search", "name": "Host list", "options": { "query": "| inputlookup unifi_hosts_manual | append [| inputlookup unifi_hosts] | dedup ip | eval label=hostname.\" (\".ip.\")\" | sort label | rename ip AS value | table label value" } },
             "ds.search": {
                 "options": {
                     "queryParameters": { "earliest": "$global_time.earliest$", "latest": "$global_time.latest$" }
@@ -22,16 +36,19 @@
         }
     },
     "dataSources": {
-        "ds_kpi_blk":  { "type": "ds.search", "name": "Ports targeted (blocked)", "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | stats dc(dest_port) AS ports" } },
-        "ds_kpi_alw":  { "type": "ds.search", "name": "Ports allowed inbound",    "options": { "query": "eventtype=unifi_traffic direction=inbound action=allowed | stats dc(dest_port) AS ports" } },
-        "ds_kpi_top":  { "type": "ds.search", "name": "Most targeted port",       "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | `unifi_port_service` | eval port=transport.\"/\".dest_port | stats count by port service | sort - count | head 1 | eval top=port.\" (\".service.\")\" | table top" } },
-        "ds_kpi_scan": { "type": "ds.search", "name": "Scanners (5+ ports)",      "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | stats dc(dest_port) AS p by src_ip | where p>=5 | stats count AS scanners" } },
-        "ds_exploited": { "type": "ds.search", "name": "Most exploited ports", "options": { "query": "eventtype=unifi_traffic direction=inbound | `unifi_port_service` | eval port=transport.\"/\".dest_port | stats count(eval(action=\"blocked\")) AS Blocked count(eval(action=\"allowed\")) AS Allowed dc(src_ip) AS \"Source IPs\" min(_time) AS first max(_time) AS last by port service category | eval Status=case(Allowed>0 AND Blocked>0,\"Mixed\", Allowed>0,\"Allowed\", true(),\"Blocked\"), \"First seen\"=strftime(first,\"%F %T\"), \"Last seen\"=strftime(last,\"%F %T\") | sort - Blocked | head 30 | table port service category Status Blocked Allowed \"Source IPs\" \"First seen\" \"Last seen\" | rename port AS Port, service AS Service, category AS Category" } },
-        "ds_bar": { "type": "ds.search", "name": "Blocked vs allowed by port", "options": { "query": "eventtype=unifi_traffic direction=inbound | eval port=transport.\"/\".dest_port | chart count over port by action | addtotals | sort - Total | head 15 | fields - Total" } },
-        "ds_cat": { "type": "ds.search", "name": "Blocked attempts by category", "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | `unifi_port_service` | stats count by category | sort - count" } },
-        "ds_scanners": { "type": "ds.search", "name": "Port scanners", "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | stats dc(dest_port) AS \"Ports tried\" count AS Attempts values(dest_port) AS ports by src_ip | where 'Ports tried'>=5 | sort - \"Ports tried\" | head 25 | iplocation src_ip | eval Ports=mvjoin(mvindex(ports,0,14),\", \") | table src_ip Country City \"Ports tried\" Attempts Ports | rename src_ip AS \"Source IP\"" } },
-        "ds_unusual": { "type": "ds.search", "name": "Outbound to uncommon ports", "options": { "query": "eventtype=unifi_traffic direction=outbound NOT dest_port IN (53, 80, 123, 443, 853) | `unifi_port_service` | eval port=transport.\"/\".dest_port | stats count AS Connections dc(src_ip) AS Clients dc(dest_ip) AS \"Dest IPs\" by port service | sort - Connections | head 20 | rename port AS Port, service AS Service" } },
-        "ds_trend": { "type": "ds.search", "name": "Blocked attempts by category over time", "options": { "query": "eventtype=unifi_traffic direction=inbound action=blocked | `unifi_port_service` | timechart count by category" } }
+        "ds_hosts": { "type": "ds.search", "name": "Host list", "options": { "query": "| inputlookup unifi_hosts_manual | append [| inputlookup unifi_hosts] | dedup ip | eval label=hostname.\" (\".ip.\")\" | sort label | rename ip AS value | table label value" } },
+        "ds_kpi_blk":  { "type": "ds.search", "name": "Ports targeted (blocked)", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound action=blocked | stats dc(dest_port) AS ports" } },
+        "ds_kpi_alw":  { "type": "ds.search", "name": "Ports allowed inbound",    "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound action=allowed | stats dc(dest_port) AS ports" } },
+        "ds_kpi_top":  { "type": "ds.search", "name": "Most targeted port",       "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound action=blocked | `unifi_port_service` | eval port=transport.\"/\".dest_port | stats count by port service | sort - count | head 1 | eval top=port.\" (\".service.\")\" | table top" } },
+        "ds_kpi_scan": { "type": "ds.search", "name": "Scanners (5+ ports)",      "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound action=blocked | stats dc(dest_port) AS p by src_ip | where p>=5 | stats count AS scanners" } },
+        "ds_exploited": { "type": "ds.search", "name": "Most exploited ports", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound | `unifi_port_service` | eval port=transport.\"/\".dest_port, exposed=if(action==\"allowed\", coalesce(dest_host,dest_ip), null()) | stats count(eval(action=\"blocked\")) AS Blocked count(eval(action=\"allowed\")) AS Allowed dc(src_ip) AS \"Source IPs\" values(exposed) AS exposed_hosts min(_time) AS first max(_time) AS last by port service category | eval Status=case(Allowed>0 AND Blocked>0,\"Mixed\", Allowed>0,\"Allowed\", true(),\"Blocked\"), \"Exposed internal hosts\"=coalesce(mvjoin(exposed_hosts,\", \"),\"none (router WAN)\"), \"First seen\"=strftime(first,\"%F %T\"), \"Last seen\"=strftime(last,\"%F %T\") | sort - Blocked | head 30 | table port service category Status Blocked Allowed \"Exposed internal hosts\" \"Source IPs\" \"First seen\" \"Last seen\" | rename port AS Port, service AS Service, category AS Category" } },
+        "ds_exposed": { "type": "ds.search", "name": "Exposed ports by internal host", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound action=allowed | `unifi_port_service` | eval dest_host=coalesce(dest_host,\"-\"), port=transport.\"/\".dest_port, app=coalesce(rule,\"-\") | stats count by dest_host dest_ip port service app src_ip | iplocation src_ip | stats sum(count) AS Connections dc(src_ip) AS \"Source IPs\" values(Country) AS countries by dest_host dest_ip port service app | eval \"From countries\"=mvjoin(mvindex(countries,0,4),\", \") | sort - Connections | rename dest_host AS Host, dest_ip AS IP, port AS Port, service AS Service, app AS App | table Host IP Port Service App Connections \"Source IPs\" \"From countries\"" } },
+        "ds_bar": { "type": "ds.search", "name": "Blocked vs allowed by port", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound | eval port=transport.\"/\".dest_port | chart count over port by action | addtotals | sort - Total | head 15 | fields - Total" } },
+        "ds_cat": { "type": "ds.search", "name": "Blocked attempts by category", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound action=blocked | `unifi_port_service` | stats count by category | sort - count" } },
+        "ds_scanners": { "type": "ds.search", "name": "Port scanners", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound action=blocked | stats dc(dest_port) AS \"Ports tried\" count AS Attempts values(dest_port) AS ports by src_ip | where 'Ports tried'>=5 | sort - \"Ports tried\" | head 25 | iplocation src_ip | eval Ports=mvjoin(mvindex(ports,0,14),\", \") | table src_ip Country City \"Ports tried\" Attempts Ports | rename src_ip AS \"Source IP\"" } },
+        "ds_unusual": { "type": "ds.search", "name": "Outbound to uncommon ports", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound NOT dest_port IN (53, 80, 123, 443, 853) | `unifi_port_service` | eval port=transport.\"/\".dest_port, client=coalesce(src_host,src_ip) | stats count AS Connections dc(src_ip) AS Clients values(client) AS clients dc(dest_ip) AS \"Dest IPs\" by port service | eval \"Internal hosts\"=mvjoin(mvindex(clients,0,4),\", \") | sort - Connections | head 20 | rename port AS Port, service AS Service | table Port Service Connections Clients \"Internal hosts\" \"Dest IPs\"" } },
+        "ds_host_ports": { "type": "ds.search", "name": "Uncommon outbound ports by internal host", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=outbound NOT dest_port IN (53, 80, 123, 443, 853) | `unifi_port_service` | eval src_host=coalesce(src_host,\"-\"), port=transport.\"/\".dest_port | stats count AS Connections dc(dest_ip) AS \"Dest IPs\" by src_host src_ip port service | sort - Connections | head 50 | rename src_host AS Host, src_ip AS IP, port AS Port, service AS Service | table Host IP Port Service Connections \"Dest IPs\"" } },
+        "ds_trend": { "type": "ds.search", "name": "Blocked attempts by category over time", "options": { "query": "eventtype=unifi_traffic (src_ip=$hostf$ OR dest_ip=$hostf$) direction=inbound action=blocked | `unifi_port_service` | timechart count by category" } }
     },
     "visualizations": {
         "viz_navstrip": { "type": "splunk.markdown", "options": { "markdown": "[Overview](unifi_overview)   |   [Inbound / Threats](unifi_inbound)   |   [Outbound](unifi_outbound)   |   **Ports**   |   [Security Events](unifi_security)", "fontSize": "small", "fontColor": "#d0d4da", "backgroundColor": "#1a1c21" } },
@@ -49,12 +66,14 @@
         "viz_exploited": { "type": "splunk.table", "title": "Most exploited inbound ports",          "dataSources": { "primary": "ds_exploited" } },
         "viz_scanners":  { "type": "splunk.table", "title": "Port scanners (5+ ports tried)",        "dataSources": { "primary": "ds_scanners" } },
         "viz_unusual":   { "type": "splunk.table", "title": "Allowed outbound to uncommon ports (not 53/80/123/443/853)", "dataSources": { "primary": "ds_unusual" } },
+        "viz_exposed":   { "type": "splunk.table", "title": "Exposed ports by internal host: allowed inbound (click a row to filter)", "dataSources": { "primary": "ds_exposed" }, "eventHandlers": [ { "type": "drilldown.setToken", "options": { "tokens": [ { "token": "hostf", "key": "row.IP.value" } ] } } ] },
+        "viz_host_ports": { "type": "splunk.table", "title": "Uncommon outbound ports by internal host (click a row to filter)", "dataSources": { "primary": "ds_host_ports" }, "eventHandlers": [ { "type": "drilldown.setToken", "options": { "tokens": [ { "token": "hostf", "key": "row.IP.value" } ] } } ] },
         "viz_trend":     { "type": "splunk.column", "title": "Blocked attempts by service category over time", "dataSources": { "primary": "ds_trend" }, "options": { "stackMode": "stacked" } }
     },
     "layout": {
         "type": "grid",
-        "options": { "width": 1440, "height": 1860 },
-        "globalInputs": ["input_time"],
+        "options": { "width": 1440, "height": 2260 },
+        "globalInputs": ["input_time", "input_host"],
         "structure": [
             { "item": "viz_navstrip", "type": "block", "position": { "x": 0, "y": 0, "w": 1440, "h": 40 } },
             { "item": "viz_kpi_blk",   "type": "block", "position": { "x": 0,    "y": 40,    "w": 360,  "h": 120 } },
@@ -66,7 +85,9 @@
             { "item": "viz_exploited", "type": "block", "position": { "x": 0,    "y": 610,  "w": 1440, "h": 500 } },
             { "item": "viz_scanners",  "type": "block", "position": { "x": 0,    "y": 1110, "w": 720,  "h": 400 } },
             { "item": "viz_unusual",   "type": "block", "position": { "x": 720,  "y": 1110, "w": 720,  "h": 400 } },
-            { "item": "viz_trend",     "type": "block", "position": { "x": 0,    "y": 1510, "w": 1440, "h": 350 } }
+            { "item": "viz_exposed",   "type": "block", "position": { "x": 0,    "y": 1510, "w": 720,  "h": 400 } },
+            { "item": "viz_host_ports","type": "block", "position": { "x": 720,  "y": 1510, "w": 720,  "h": 400 } },
+            { "item": "viz_trend",     "type": "block", "position": { "x": 0,    "y": 1910, "w": 1440, "h": 350 } }
         ]
     }
 }
